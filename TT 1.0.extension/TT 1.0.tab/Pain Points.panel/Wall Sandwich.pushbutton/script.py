@@ -55,50 +55,63 @@ def read_defaults():
             lines = f.read().splitlines()
             if len(lines) >= 3:
                 return {"offsets": lines[0], "left_walltype": lines[1], "right_walltype": lines[2]}
-    return {"offsets": "0,0,0,0", "left_walltype": None, "right_walltype": None}
+    return None
 
 # Save defaults to file
 def save_defaults(offsets, left_type, right_type):
     with open(DEFAULTS_FILE, "w") as f:
         f.write(offsets + "\n")
-        f.write(left_type or "" + "\n")
-        f.write(right_type or "")
+        f.write((left_type or "") + "\n")
+        f.write((right_type or "") + "\n")
 
-# Load previous defaults
-defaults = read_defaults()
-def_str = defaults.get("offsets", "0,0,0,0")
-
-# Prompt for offsets in mm
-values = forms.ask_for_string(
-    default=def_str,
-    prompt="Enter offsets in mm as: Left Base, Left Top, Right Base, Right Top",
-    title="Wall Offsets in mm"
-)
-
-try:
-    l_base, l_top, r_base, r_top = [float(x) * MM_TO_FEET for x in values.split(",")]
-except:
-    forms.alert("Invalid input. Enter 4 numbers in mm, separated by commas.", exitscript=True)
-
-# Get offset direction vector
-direction = location_curve.GetEndPoint(1) - location_curve.GetEndPoint(0)
+# Retrieve direction vector
+point1 = location_curve.GetEndPoint(0)
+point2 = location_curve.GetEndPoint(1)
+direction = point2 - point1
 perp = XYZ(-direction.Y, direction.X, 0).Normalize()
 
-# Prompt user to pick wall types
+# Get wall types and names
 wall_types = [wt for wt in FilteredElementCollector(doc).OfClass(WallType) if wt.Kind == WallKind.Basic]
 wt_names = [wt.get_Parameter(BuiltInParameter.SYMBOL_NAME_PARAM).AsString() for wt in wall_types]
 
-left_default = defaults.get("left_walltype")
-right_default = defaults.get("right_walltype")
+# Load defaults and ask if reuse
+defaults = read_defaults()
+if defaults:
+    reuse = forms.alert("Use previous wall types and offsets?", options=["Yes", "No"])
+else:
+    reuse = "No"
 
-left_choice = forms.SelectFromList.show(wt_names, title="Select Left Finish Wall Type", default=left_default, button_name="Use This Type")
-if not left_choice:
-    forms.alert("No left wall type selected.", exitscript=True)
+if reuse == "Yes":
+    values = defaults["offsets"]
+    left_choice = defaults["left_walltype"]
+    right_choice = defaults["right_walltype"]
+else:
+    def_str = defaults["offsets"] if defaults else "0,0,0,0"
+    values = forms.ask_for_string(
+        default=def_str,
+        prompt="Enter offsets in mm as: Left Base, Left Top, Right Base, Right Top",
+        title="Wall Offsets in mm"
+    )
+    try:
+        _ = [float(x) for x in values.split(",")]
+    except:
+        forms.alert("Invalid input. Enter 4 numbers in mm, separated by commas.", exitscript=True)
 
-right_choice = forms.SelectFromList.show(wt_names, title="Select Right Finish Wall Type", default=right_default, button_name="Use This Type")
-if not right_choice:
-    forms.alert("No right wall type selected.", exitscript=True)
+    left_choice = forms.SelectFromList.show(wt_names, title="Select Left Finish Wall Type", default=(defaults.get("left_walltype") if defaults else None), button_name="Use This Type")
+    if not left_choice:
+        forms.alert("No left wall type selected.", exitscript=True)
 
+    right_choice = forms.SelectFromList.show(wt_names, title="Select Right Finish Wall Type", default=(defaults.get("right_walltype") if defaults else None), button_name="Use This Type")
+    if not right_choice:
+        forms.alert("No right wall type selected.", exitscript=True)
+
+    # Save current values
+    save_defaults(values, left_choice, right_choice)
+
+# Convert values to feet
+l_base, l_top, r_base, r_top = [float(x) * MM_TO_FEET for x in values.split(",")]
+
+# Get selected wall types
 left_wall_type = next(wt for wt in wall_types if wt.get_Parameter(BuiltInParameter.SYMBOL_NAME_PARAM).AsString() == left_choice)
 right_wall_type = next(wt for wt in wall_types if wt.get_Parameter(BuiltInParameter.SYMBOL_NAME_PARAM).AsString() == right_choice)
 
@@ -135,10 +148,9 @@ for offset_sign, base_offset_delta, top_offset_delta, wall_type in [
 
 transaction.Commit()
 
-# Save current values
-save_defaults(values, left_choice, right_choice)
-
 TaskDialog.Show("Wall Sandwich", "Finish walls created!")
+
+
 
 
 
