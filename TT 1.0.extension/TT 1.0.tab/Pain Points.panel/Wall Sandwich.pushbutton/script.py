@@ -32,21 +32,14 @@ class WallSelectionFilter(ISelectionFilter):
     def AllowReference(self, ref, point):
         return True
 
-# Prompt user to select a structural wall
+# Prompt user to select structural walls
 sel = uidoc.Selection
 try:
-    ref = sel.PickObject(ObjectType.Element, WallSelectionFilter(), "Select a structural wall")
+    refs = sel.PickObjects(ObjectType.Element, WallSelectionFilter(), "Select structural walls")
 except:
-    forms.alert("No wall selected.", exitscript=True)
+    forms.alert("No walls selected.", exitscript=True)
 
-wall = doc.GetElement(ref.ElementId)
-location_curve = wall.Location.Curve
-level = doc.GetElement(wall.LevelId)
-
-# Read structural wall offsets
-struct_base_offset = wall.get_Parameter(BuiltInParameter.WALL_BASE_OFFSET).AsDouble()
-struct_top_offset = wall.get_Parameter(BuiltInParameter.WALL_TOP_OFFSET).AsDouble()
-struct_wall_thickness = wall.WallType.Width
+walls = [doc.GetElement(r.ElementId) for r in refs]
 
 # Read previous defaults from file
 def read_defaults():
@@ -64,22 +57,16 @@ def save_defaults(offsets, left_type, right_type):
         f.write((left_type or "") + "\n")
         f.write((right_type or "") + "\n")
 
-# Retrieve direction vector
-point1 = location_curve.GetEndPoint(0)
-point2 = location_curve.GetEndPoint(1)
-direction = point2 - point1
-perp = XYZ(-direction.Y, direction.X, 0).Normalize()
-
-# Get wall types and names
-wall_types = [wt for wt in FilteredElementCollector(doc).OfClass(WallType) if wt.Kind == WallKind.Basic]
-wt_names = [wt.get_Parameter(BuiltInParameter.SYMBOL_NAME_PARAM).AsString() for wt in wall_types]
-
 # Load defaults and ask if reuse
 defaults = read_defaults()
 if defaults:
     reuse = forms.alert("Use previous wall types and offsets?", options=["Yes", "No"])
 else:
     reuse = "No"
+
+# Get wall types and names
+wall_types = [wt for wt in FilteredElementCollector(doc).OfClass(WallType) if wt.Kind == WallKind.Basic]
+wt_names = [wt.get_Parameter(BuiltInParameter.SYMBOL_NAME_PARAM).AsString() for wt in wall_types]
 
 if reuse == "Yes":
     values = defaults["offsets"]
@@ -119,36 +106,47 @@ right_wall_type = next(wt for wt in wall_types if wt.get_Parameter(BuiltInParame
 transaction = Transaction(doc, "Create Wall Sandwich")
 transaction.Start()
 
-for offset_sign, base_offset_delta, top_offset_delta, wall_type in [
-    (+1, l_base, l_top, left_wall_type),
-    (-1, r_base, r_top, right_wall_type)
-]:
-    total_offset = (struct_wall_thickness / 2.0) + (wall_type.Width / 2.0)
-    offset = perp * total_offset * offset_sign
-    transform = Transform.CreateTranslation(offset)
-    new_curve = location_curve.CreateTransformed(transform)
+for wall in walls:
+    location_curve = wall.Location.Curve
+    level = doc.GetElement(wall.LevelId)
+    struct_base_offset = wall.get_Parameter(BuiltInParameter.WALL_BASE_OFFSET).AsDouble()
+    struct_top_offset = wall.get_Parameter(BuiltInParameter.WALL_TOP_OFFSET).AsDouble()
+    struct_wall_thickness = wall.WallType.Width
 
-    new_wall = Wall.Create(
-        doc,
-        new_curve,
-        wall_type.Id,
-        level.Id,
-        10.0,
-        struct_base_offset + base_offset_delta,
-        False,
-        False
-    )
+    direction = location_curve.GetEndPoint(1) - location_curve.GetEndPoint(0)
+    perp = XYZ(-direction.Y, direction.X, 0).Normalize()
 
-    new_wall.get_Parameter(BuiltInParameter.WALL_HEIGHT_TYPE).Set(
-        wall.get_Parameter(BuiltInParameter.WALL_HEIGHT_TYPE).AsElementId()
-    )
-    new_wall.get_Parameter(BuiltInParameter.WALL_TOP_OFFSET).Set(
-        struct_top_offset + top_offset_delta
-    )
+    for offset_sign, base_offset_delta, top_offset_delta, wall_type in [
+        (+1, l_base, l_top, left_wall_type),
+        (-1, r_base, r_top, right_wall_type)
+    ]:
+        total_offset = (struct_wall_thickness / 2.0) + (wall_type.Width / 2.0)
+        offset = perp * total_offset * offset_sign
+        transform = Transform.CreateTranslation(offset)
+        new_curve = location_curve.CreateTransformed(transform)
+
+        new_wall = Wall.Create(
+            doc,
+            new_curve,
+            wall_type.Id,
+            level.Id,
+            10.0,
+            struct_base_offset + base_offset_delta,
+            False,
+            False
+        )
+
+        new_wall.get_Parameter(BuiltInParameter.WALL_HEIGHT_TYPE).Set(
+            wall.get_Parameter(BuiltInParameter.WALL_HEIGHT_TYPE).AsElementId()
+        )
+        new_wall.get_Parameter(BuiltInParameter.WALL_TOP_OFFSET).Set(
+            struct_top_offset + top_offset_delta
+        )
 
 transaction.Commit()
 
-TaskDialog.Show("Wall Sandwich", "Finish walls created!")
+TaskDialog.Show("Wall Sandwich", "Finish walls created for all selected walls!")
+
 
 
 
