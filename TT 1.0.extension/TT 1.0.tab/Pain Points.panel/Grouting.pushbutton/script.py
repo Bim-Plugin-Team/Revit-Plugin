@@ -54,7 +54,7 @@ if forms.alert('Add grout on BOTTOM?', options=['Yes', 'No']) == 'Yes':
 if not selected_sides:
     script.exit()
 
-thickness_input = forms.ask_for_string(default="50", prompt="Grout thickness in mm:")
+thickness_input = forms.ask_for_string(default="20", prompt="Grout thickness in mm:")
 try:
     grout_thickness = float(thickness_input) / 304.8  # mm to feet
 except:
@@ -113,6 +113,11 @@ with revit.Transaction("Place Grout Voids"):
             InstanceVoidCutUtils.AddInstanceVoidCut(doc, wall, void_inst)
 
 forms.alert("✅ Voids placed and wall cut successfully.")
+
+
+
+
+
 
 
 
